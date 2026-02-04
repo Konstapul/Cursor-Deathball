@@ -1,0 +1,40 @@
+/**
+ * Shared game context - populated by main.js so enemy.js and player.js
+ * can access game state without circular dependencies.
+ */
+export const gameContext = {
+    player: null,
+    arena: null,
+    wave: 1,
+    enemies: null,
+    bullets: null,
+    corpses: null,
+    pickups: null,
+    particles: null,
+    debris: null,
+    grenades: null,
+    mines: null,
+    turrets: null,
+    godMode: false,
+    noisePos: null,
+    shakeX: 0,
+    shakeY: 0,
+    hitStop: 0,
+    WORLD_SIZE: 3000,
+    ARENA_START_SIZE: 800,
+    ARENA_GROWTH: 100,
+    KILLS_PER_WAVE: 35,
+    endGame: null,
+    killEnemy: null,
+    createExplosion: null,
+    detonateNuke: null,
+    updateUI: null,
+    Audio: null,
+    normalizeAngle: null,
+    WEAPONS: null,
+    SECONDARIES: null,
+    Enemy: null,
+    Particle: null,
+    Debris: null,
+    Pickup: null
+};

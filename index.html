@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sector Zero - Phobia Tribute</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="flash-overlay"></div>
+    <div id="warning-overlay"><div id="warning-text">⚠ NUCLEAR DETECTED ⚠</div></div>
+    <div id="audio-notify">AUDIO: ALL ON</div>
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- DEV MENU -->
+    <div id="dev-menu">
+        <h3>DEV CONSOLE</h3>
+        <div id="track-info">TRACK: NONE</div>
+        <button class="dev-btn" id="dev-set-smg">SET WEAPON: SMG</button>
+        <button class="dev-btn" id="dev-set-shotgun">SET WEAPON: SHOTGUN</button>
+        <button class="dev-btn" id="dev-force-levelup">FORCE LEVEL UP (CURRENT)</button>
+        <button class="dev-btn" id="dev-boss-fight">JUMP TO BOSS (W20)</button>
+        <button class="dev-btn" id="dev-max-ammo">MAX AMMO</button>
+        <button class="dev-btn" id="god-mode-btn">GOD MODE: OFF</button>
+        <button class="dev-btn" id="super-dmg-btn">SUPER DAMAGE: OFF</button>
+        <button class="dev-btn" id="dev-nuke">SPAWN NUKE</button>
+        <button class="dev-btn" id="dev-change-track">SKIP TRACK</button>
+        <div style="font-size:10px; color:#666; margin-top:5px; text-align:center;">Press L to Toggle Menu</div>
+        <div style="font-size:10px; color:#888; text-align:center;">Press M to Toggle Audio</div>
+    </div>
+
+    <!-- NEW HUD STRUCTURE -->
+    <div id="hud-top-left">
+        <div class="bar-wrapper">
+            <div class="bar-label">Health</div>
+            <div id="health-container"><div id="health-fill"></div></div>
+        </div>
+        <div class="sub-bars">
+            <div class="sub-bar-group">
+                <div class="bar-label">Dash</div>
+                <div class="sub-bar-container"><div class="sub-bar-fill" id="dash-fill"></div></div>
+            </div>
+            <div class="sub-bar-group">
+                <div class="bar-label">Focus</div>
+                <div class="sub-bar-container"><div class="sub-bar-fill" id="focus-fill"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="hud-top-right">
+        <div class="score-label">Confirmed Kills</div>
+        <div class="score-val" id="score-display">0</div>
+        <div class="score-label" style="font-size: 10px; margin-top: 5px;">High Score: <span id="highscore-display">0</span></div>
+        <div class="wave-val" id="wave-display">WAVE 1</div>
+    </div>
+
+    <div id="hud-bottom">
+        <!-- Primary Weapon -->
+        <div class="weapon-widget" id="primary-widget">
+            <div class="w-name" id="p-name">PISTOL</div>
+            <div class="w-row">
+                <div class="w-bar-box"><div class="w-bar-fill" id="p-bar"></div></div>
+                <div class="w-count" id="p-count">∞</div>
+            </div>
+            <div id="weapon-xp-indicator" class="xp-indicator"></div>
+        </div>
+        
+        <!-- Secondary Weapon -->
+        <div class="weapon-widget secondary" id="secondary-widget" style="display:none;">
+            <div class="w-name" id="s-name">GRENADE</div>
+            <div class="w-row">
+                <div class="w-bar-box" style="width: 120px;"><div class="w-bar-fill" id="s-bar"></div></div>
+                <div class="w-count" id="s-count" style="font-size: 24px;">0</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="start-screen">
+        <h1 style="font-size: 40px; margin: 0 0 10px 0;">SECTOR ZERO</h1>
+        <p>SURVIVE THE HORDE</p>
+        <div class="controls-hint">
+            <p>WASD to Move | Mouse to Aim</p>
+            <p>SHIFT to Activate Bullet Time</p>
+            <p>SPACE to Dash | R-CLICK for Secondary | P to Pause</p>
+            <p>M to Mute Audio | Boss Warning: Wave 20</p>
+        </div>
+        <button id="start-btn">INITIATE</button>
+    </div>
+
+    <div id="pause-screen">
+        <h1 style="font-size: 40px; margin: 0 0 10px 0;">PAUSED</h1>
+        <p>TACTICAL SUSPENSION</p>
+        <button id="resume-btn">RESUME</button>
+    </div>
+
+    <div id="game-over">
+        <h1 style="font-size: 40px; margin: 0 0 10px 0;">M.I.A.</h1>
+        <p>SECTOR LOST</p>
+        <p>CONFIRMED KILLS: <span id="final-kills">0</span></p>
+        <p>TOTAL SCORE: <span id="final-points" style="color: #ffff00; font-weight:bold;">0</span></p>
+        <div id="boss-hint">⚠ BOSS DEFEATED: PRESS 'L' FOR CLASSIFIED MENU ⚠</div>
+        <button id="restart-btn">REDEPLOY</button>
+    </div>
+
+    <!-- WEAPON UPGRADE SELECTION -->
+    <div id="upgrade-selection" style="display:none;">
+        <h1 style="font-size: 34px; margin: 0 0 10px 0;">WEAPON LEVEL UP</h1>
+        <p id="upgrade-weapon-name" style="margin: 0 0 20px 0;"></p>
+        <div id="upgrade-choices"></div>
+        <div class="controls-hint" style="margin-top: 18px;">Choose one upgrade.</div>
+    </div>
+
+    <script type="module" src="src/main.js"></script>
+</body>
+</html>

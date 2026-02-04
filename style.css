@@ -1,0 +1,328 @@
+body {
+    margin: 0;
+    overflow: hidden;
+    background: #050505;
+    cursor: crosshair;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    user-select: none;
+}
+canvas { display: block; position: absolute; top: 0; left: 0; }
+
+#flash-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 100;
+    transition: opacity 0.1s ease-out;
+}
+
+#warning-overlay {
+    position: absolute;
+    top: 15%; left: 0; width: 100%;
+    text-align: center;
+    pointer-events: none;
+    z-index: 90;
+    display: none;
+}
+#warning-text {
+    font-size: 30px;
+    font-weight: 700;
+    color: #ff3333;
+    text-shadow: 0 0 10px #ff0000;
+    letter-spacing: 2px;
+    background: rgba(0,0,0,0.5);
+    padding: 10px;
+    display: inline-block;
+    border: 1px solid #ff3333;
+    animation: blink 0.5s infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* --- NEW HUD STYLES --- */
+#hud-top-left {
+    position: absolute; top: 20px; left: 20px;
+    display: flex; flex-direction: column; gap: 8px;
+    width: 280px;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.bar-wrapper {
+    position: relative;
+}
+.bar-label {
+    font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px;
+    margin-bottom: 2px; font-weight: 700;
+}
+
+/* Health Bar */
+#health-container {
+    width: 100%; height: 20px;
+    background: rgba(10, 10, 10, 0.8);
+    border: 1px solid #444;
+    transform: skewX(-20deg);
+    padding: 2px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+#health-fill {
+    height: 100%; width: 100%; 
+    background: linear-gradient(90deg, #cc0000, #ff3333);
+    box-shadow: 0 0 10px #ff0000;
+    transition: width 0.1s;
+}
+
+/* Sub Bars (Dash/Focus) */
+.sub-bars {
+    display: flex; gap: 10px;
+    margin-top: 5px;
+}
+.sub-bar-group { flex: 1; }
+.sub-bar-container {
+    width: 100%; height: 6px;
+    background: rgba(10, 10, 10, 0.8);
+    border: 1px solid #444;
+    transform: skewX(-20deg);
+    padding: 1px;
+}
+.sub-bar-fill { height: 100%; width: 100%; transition: width 0.1s; }
+#dash-fill { background: #fff; box-shadow: 0 0 5px #fff; }
+#focus-fill { background: #ffcc00; box-shadow: 0 0 5px #ffcc00; }
+
+/* Top Right Score */
+#hud-top-right {
+    position: absolute; top: 20px; right: 20px;
+    text-align: right;
+    pointer-events: none;
+    z-index: 10;
+}
+.score-val { font-size: 32px; font-weight: 900; color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.3); line-height: 1; }
+.score-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px; }
+.wave-val { font-size: 20px; color: #44ff44; font-weight: bold; margin-top: 5px; }
+
+/* Bottom HUD (Weapons) */
+#hud-bottom {
+    position: absolute; bottom: 30px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; align-items: flex-end; gap: 40px;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.weapon-widget {
+    display: flex; flex-direction: column; align-items: center;
+    opacity: 0.9; transition: opacity 0.2s, transform 0.2s;
+}
+.weapon-widget.secondary { opacity: 0.6; transform: scale(0.85); }
+.weapon-widget.secondary.active { opacity: 1; transform: scale(1.0); }
+
+.w-name {
+    font-size: 16px; font-weight: 800; color: #ffff00; text-transform: uppercase;
+    letter-spacing: 1px; text-shadow: 0 0 5px rgba(255, 255, 0, 0.5);
+    margin-bottom: 4px;
+}
+.w-row { display: flex; align-items: center; gap: 10px; }
+.w-bar-box {
+    width: 180px; height: 10px;
+    background: rgba(20, 20, 20, 0.8);
+    border: 1px solid #555;
+    transform: skewX(-20deg);
+    padding: 2px;
+    display: flex; justify-content: flex-start;
+}
+.w-bar-fill {
+    height: 100%; width: 100%; background: #fff;
+    box-shadow: 0 0 8px currentColor;
+    transition: width 0.1s, background-color 0.2s;
+}
+.w-count {
+    font-size: 28px; font-weight: 900; color: #fff;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    min-width: 60px; text-align: left;
+}
+
+/* Secondary specific styles override */
+.weapon-widget.secondary .w-name { color: #44ff44; text-shadow: 0 0 5px rgba(68, 255, 68, 0.5); }
+.weapon-widget.secondary .w-bar-fill { background-color: #44ff44; }
+
+#dev-menu {
+    display: none;
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 200px;
+    background: rgba(0, 0, 0, 0.9);
+    border: 2px solid #44ff44;
+    padding: 10px;
+    z-index: 100;
+    font-family: monospace;
+}
+#dev-menu h3 {
+    margin: 0 0 10px 0;
+    color: #44ff44;
+    text-align: center;
+    border-bottom: 1px solid #333;
+    padding-bottom: 5px;
+}
+#track-info {
+    font-size: 11px;
+    color: #ffff00;
+    text-align: center;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #333;
+    padding-bottom: 5px;
+}
+.dev-btn {
+    display: block;
+    width: 100%;
+    background: #222;
+    color: #fff;
+    border: 1px solid #444;
+    padding: 5px;
+    margin-bottom: 5px;
+    cursor: pointer;
+    text-align: left;
+    font-size: 12px;
+}
+.dev-btn:hover { background: #444; }
+
+#game-over, #start-screen, #pause-screen {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 20;
+    background: rgba(0, 10, 0, 0.95);
+    padding: 40px;
+    border: 2px solid #44ff44;
+    color: #44ff44;
+    box-shadow: 0 0 50px rgba(0, 255, 0, 0.2);
+}
+#game-over { display: none; }
+#pause-screen { display: none; z-index: 95; }
+
+#upgrade-selection {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 96;
+    background: rgba(0, 10, 0, 0.97);
+    padding: 36px;
+    border: 2px solid #ffff00;
+    color: #ffff00;
+    box-shadow: 0 0 60px rgba(255, 255, 0, 0.15);
+    min-width: 520px;
+    max-width: 820px;
+}
+
+#upgrade-choices {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+}
+
+.upgrade-choice {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid #555;
+    padding: 14px 16px;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    color: #fff;
+}
+
+.upgrade-choice:hover {
+    border-color: #ffff00;
+    background: rgba(255, 255, 0, 0.08);
+}
+
+.upgrade-title {
+    font-size: 18px;
+    font-weight: 900;
+    color: #ffff00;
+    margin: 0 0 6px 0;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.upgrade-desc {
+    font-size: 12px;
+    color: #ccc;
+    margin: 0;
+    line-height: 1.4;
+}
+
+#boss-hint {
+    display: none;
+    margin-top: 20px;
+    font-size: 14px;
+    color: #ffff00;
+    border-top: 1px solid #44ff44;
+    padding-top: 10px;
+    animation: pulse 2s infinite;
+}
+@keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+
+/* AUDIO NOTIFICATION */
+#audio-notify {
+    position: absolute;
+    top: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 24px;
+    font-weight: bold;
+    color: #fff;
+    background: rgba(0,0,0,0.7);
+    padding: 10px 20px;
+    border: 1px solid #fff;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.5s;
+    pointer-events: none;
+    z-index: 200;
+}
+
+button {
+    background: #003300;
+    border: 1px solid #44ff44;
+    color: #44ff44;
+    padding: 15px 30px;
+    font-size: 20px;
+    cursor: pointer;
+    text-transform: uppercase;
+    margin-top: 20px;
+    font-family: inherit;
+}
+button:hover { background: #44ff44; color: #000; }
+.controls-hint { color: #888; font-size: 14px; margin-top: 10px; }
+
+/* XP indicator */
+.xp-indicator {
+    margin-top: 6px;
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: none;
+}
+.xp-indicator .xp-text {
+    display: block;
+    margin-bottom: 2px;
+    font-weight: 700;
+}
+.xp-indicator .xp-bar {
+    width: 100%;
+    height: 4px;
+    background: rgba(20, 20, 20, 0.9);
+    border: 1px solid #444;
+    overflow: hidden;
+}
+.xp-indicator .xp-bar-fill {
+    height: 100%;
+    background: #ffff00;
+    transition: width 0.1s;
+}
