@@ -102,7 +102,10 @@ let player = {
     weapon: 'pistol', ammo: Infinity,
     secondaryWeapon: null, secondaryAmmo: 0,
     focus: 100, maxFocus: 100, focusActive: false,
-    minigunWindup: 0, minigunSoundTimer: 0
+    minigunWindup: 0, minigunSoundTimer: 0,
+    universalUpgrades: [], dashUnlocked: false, focusUnlocked: false, grenadesUnlocked: false, ammoBonusPercent: 0,
+    dead: false,
+    deathTimer: 0
 };
 
 let bullets = [];
@@ -127,6 +130,7 @@ let lastNukeSpawnTime = -99999;
 let score = 0;
 let points = 0;
 let highScore = 0;
+let lives = 3;
 let wave = 1;
 let gameTime = 0;
 let isGameRunning = false;
@@ -138,6 +142,8 @@ let nukeTimer = 0;
 let godMode = false;
 let superDamage = false;
 let isPaused = false;
+let isDeathScreenShowing = false;
+let hasProcessedDeathScreen = false;
 let bossKilled = false;
 let arena = { x: 0, y: 0, w: 0, h: 0, targetW: 0, targetH: 0 };
 
@@ -150,8 +156,27 @@ let weaponShotCount = {
     smg: 0
 };
 
+let weaponKills = {
+    smg: 0,
+    shotgun: 0,
+    minigun: 0,
+    rocket: 0,
+    railgun: 0
+};
+
 let isUpgradeSelecting = false;
 let upgradeSelectingWeapon = null;
+let updateAborted = false;
+
+const UNIVERSAL_UPGRADES = [
+    { id: 'unlock_dash', name: 'Unlock Dash', description: 'Enables SPACE to dash.', stackable: false },
+    { id: 'unlock_focus', name: 'Unlock Focus', description: 'Enables SHIFT for bullet time.', stackable: false },
+    { id: 'unlock_grenades', name: 'Unlock Grenades', description: 'Enables R-CLICK for default grenade.', stackable: false },
+    { id: 'bonus_hp', name: '+10 HP', description: 'Increase max health by 10.', stackable: true },
+    { id: 'ammo_bonus', name: 'Ammo +10%', description: '+10% ammo from boxes and max ammo (all weapons).', stackable: true },
+    { id: 'double_focus', name: 'Double Focus Duration', description: 'Focus lasts 2x longer.', stackable: false, requires: 'unlock_focus' },
+    { id: 'dash_cooldown', name: 'Dash Cooldown -50%', description: 'Dash recharges twice as fast.', stackable: false, requires: 'unlock_dash' }
+];
 
 function resize() {
     width = window.innerWidth;
@@ -163,13 +188,15 @@ window.addEventListener('resize', resize);
 window.addEventListener('contextmenu', e => e.preventDefault());
 
 function updateUI() {
-    document.getElementById('health-fill').style.width = Math.max(0, player.hp) + '%';
+    document.getElementById('health-fill').style.width = Math.max(0, (player.hp / (player.maxHp || 100)) * 100) + '%';
+    const livesEl = document.getElementById('lives-display');
+    if (livesEl) livesEl.innerText = lives;
     document.getElementById('score-display').innerText = score;
     document.getElementById('highscore-display').innerText = highScore;
     document.getElementById('wave-display').innerText = 'WAVE ' + wave;
 
     const upgrades = (weaponXP[player.weapon] && weaponXP[player.weapon].upgrades) ? weaponXP[player.weapon].upgrades : [];
-    const weapon = getWeaponStats(player.weapon, upgrades) || WEAPONS[player.weapon];
+    const weapon = getWeaponStats(player.weapon, upgrades, player.ammoBonusPercent || 0) || WEAPONS[player.weapon];
     document.getElementById('p-name').innerText = weapon.name;
     document.getElementById('p-name').style.color = weapon.color;
 
@@ -205,9 +232,9 @@ function updateUI() {
     }
 
     const xpIndicator = document.getElementById('weapon-xp-indicator');
-    const xpThresholds = [30, 100, 500];
+    const xpThresholds = [40, 200, 600];
     const wt = player.weapon;
-    if (weaponXP[wt] && weaponXP[wt].level < 3 && (wt === 'smg' || wt === 'shotgun')) {
+    if (weaponXP[wt] && weaponXP[wt].level < 3 && ['smg', 'shotgun', 'minigun', 'rocket', 'railgun'].includes(wt)) {
         const data = weaponXP[wt];
         const next = xpThresholds[data.level];
         xpIndicator.style.display = 'block';
@@ -219,7 +246,7 @@ function updateUI() {
 
 function setWeapon(type) {
     const upgrades = (weaponXP[type] && weaponXP[type].upgrades) ? weaponXP[type].upgrades : [];
-    const w = getWeaponStats(type, upgrades) || WEAPONS[type];
+    const w = getWeaponStats(type, upgrades, player.ammoBonusPercent || 0) || WEAPONS[type];
     player.weapon = type; player.ammo = w.ammo; player.minigunWindup = 0;
     updateUI(); Audio.pickup();
 }
@@ -236,7 +263,7 @@ function setSecondary(type) {
 
 function addAmmo(type) {
     const upgrades = (weaponXP[type] && weaponXP[type].upgrades) ? weaponXP[type].upgrades : [];
-    const w = getWeaponStats(type, upgrades) || WEAPONS[type];
+    const w = getWeaponStats(type, upgrades, player.ammoBonusPercent || 0) || WEAPONS[type];
     player.ammo = Math.min(w.maxCarry, player.ammo + w.ammo);
     updateUI(); Audio.pickup();
 }
@@ -289,14 +316,14 @@ function detonateNuke(nx, ny) {
     }
 }
 
-function createExplosion(x, y, isBig = false, isMine = false) {
+function createExplosion(x, y, isBig = false, isMine = false, options = {}) {
     shakeX = isBig ? 40 : 20; shakeY = isBig ? 40 : 20;
     if (isMine) Audio.mineExplode(); else Audio.explode();
 
     const pCount = isBig ? 60 : 30;
     for (let i = 0; i < pCount; i++) particles.push(new Particle(x, y, '#ffaa00', isBig ? 15 : 10));
 
-    const range = isBig ? 250 : 150;
+    let range = (isBig ? 250 : 150) * (options.rangeMult || 1);
     for (let i = enemies.length - 1; i >= 0; i--) {
         let e = enemies[i]; const dist = Math.hypot(e.x - x, e.y - y);
         if (dist < range) {
@@ -314,12 +341,31 @@ function createExplosion(x, y, isBig = false, isMine = false) {
             }
         }
     }
+
+    if (options.shrapnel) {
+        const pelletDmg = WEAPONS.shotgun ? WEAPONS.shotgun.damage : 2;
+        for (let k = 0; k < 10; k++) {
+            const a = Math.random() * Math.PI * 2;
+            const pellet = new Bullet(x, y, a, 11, '#ffff00', pelletDmg, false, false, false, 'rocket');
+            bullets.push(pellet);
+        }
+    }
+
+    if (options.cluster) {
+        const baseAngle = options.clusterAngle ?? 0;
+        for (let k = 0; k < 3; k++) {
+            const spread = (Math.random() - 0.5) * 0.4;
+            const a = baseAngle + spread;
+            const mini = new Bullet(x, y, a, 12, '#ff8800', 3, true, false, false, 'rocket');
+            bullets.push(mini);
+        }
+    }
 }
 
 function killEnemy(e, angle, silent = false, weaponType = null) {
     if (e.type === 'boss') bossKilled = true;
 
-    score++; if (score > highScore) highScore = score;
+    score++; if (score > highScore) { highScore = score; document.getElementById('highscore-display').innerText = highScore; }
 
     let pts = 1;
     if (e.type === 'flanker' || e.type === 'tank') pts = 3;
@@ -328,11 +374,28 @@ function killEnemy(e, angle, silent = false, weaponType = null) {
 
     if (score % KILLS_PER_WAVE === 0) {
         wave++;
-        if (wave < 10) { arena.targetW = Math.min(WORLD_SIZE - 200, ARENA_START_SIZE + (wave * ARENA_GROWTH)); arena.targetH = Math.min(WORLD_SIZE - 200, ARENA_START_SIZE + (wave * ARENA_GROWTH)); }
+        arena.targetW = Math.min(WORLD_SIZE - 200, ARENA_START_SIZE + (wave * ARENA_GROWTH)); arena.targetH = Math.min(WORLD_SIZE - 200, ARENA_START_SIZE + (wave * ARENA_GROWTH));
 
         if (wave === 10) for (let i = 0; i < 5; i++) enemies.push(new Enemy('flanker'));
         if (wave === 15) for (let i = 0; i < 6; i++) enemies.push(new Enemy('blind'));
-        if (wave >= 20 && wave % 10 === 0) enemies.push(new Enemy('boss'));
+        if (wave === 30) {
+            for (const e of enemies) {
+                if (e.type === 'tank' && e.tankState !== 'aggro') {
+                    e.tankState = 'aggro';
+                    e.aggroTime = 900;
+                    Audio.tankAggro();
+                    shakeX = 10;
+                    shakeY = 10;
+                    for (let k = 0; k < 15; k++) particles.push(new Particle(e.x, e.y, '#ff0000', 8));
+                }
+            }
+        }
+        if (wave === 40) {
+            enemies.push(new Enemy('boss'));
+            enemies.push(new Enemy('boss'));
+        } else if (wave >= 20 && wave % 10 === 0 && wave !== 30) {
+            enemies.push(new Enemy('boss'));
+        }
         if (wave >= 25 && (wave - 5) % 10 === 0) {
              for (let i = 0; i < 3; i++) enemies.push(new Enemy('tank'));
              for (let i = 0; i < 5; i++) enemies.push(new Enemy('flanker'));
@@ -346,6 +409,9 @@ function killEnemy(e, angle, silent = false, weaponType = null) {
     if (weaponType && weaponXP[weaponType]) {
         weaponXP[weaponType].xp += 1;
         checkWeaponLevelUp(weaponType);
+    }
+    if (weaponType && weaponKills[weaponType] !== undefined) {
+        weaponKills[weaponType]++;
     }
 
     let drop = false; let baseChance = player.weapon === 'pistol' ? 0.25 : 0.12;
@@ -383,8 +449,53 @@ function killEnemy(e, angle, silent = false, weaponType = null) {
     chunkManager.drawDebris(e.x, e.y, angle, '#660000', 15, 5);
 }
 
+function createPlayerDeathAnimation() {
+    // Create explosion particles
+    for (let i = 0; i < 30; i++) {
+        particles.push(new Particle(player.x, player.y, '#ff0000', 12));
+    }
+    
+    // Create gibs (debris)
+    for (let i = 0; i < 8; i++) {
+        debris.push(new Debris(player.x, player.y, '#ff0000'));
+    }
+    
+    // Create blood splatter effect
+    chunkManager.drawDebris(player.x, player.y, Math.random() * Math.PI * 2, '#660000', 20, 8);
+    
+    // Screen shake
+    shakeX = 20;
+    shakeY = 20;
+    
+    // Play death sound
+    Audio.playerDeath();
+}
+
+function processPlayerDeath(dt) {
+    if (!player.dead || hasProcessedDeathScreen) return;
+    
+    player.deathTimer += 16.6 * dt; // Use dt for frame-rate independent timing
+    
+    // Wait 1.5 seconds (1500ms) before showing death screen
+    if (player.deathTimer >= 1500) {
+        hasProcessedDeathScreen = true; // Mark as processed
+        lives--;
+        
+        if (lives > 0) {
+            // Show death screen for respawn
+            showDeathScreen();
+        } else {
+            // No lives remaining - show game-over
+            endGame();
+        }
+        
+        // Reset death timer (will be reset in respawn anyway)
+        player.deathTimer = 0;
+    }
+}
+
 function checkWeaponLevelUp(weaponType) {
-    const thresholds = [30, 100, 500];
+    const thresholds = [40, 200, 600];
     const data = weaponXP[weaponType];
     if (!data) return;
     if (isUpgradeSelecting) return;
@@ -399,35 +510,86 @@ function showUpgradeSelection(weaponType) {
     if (!data) return;
 
     const all = WEAPON_UPGRADES[weaponType] || [];
-    const available = all.filter(u => !data.upgrades.includes(u.id));
-    if (available.length === 0) return;
+    const weaponAvailable = all.filter(u => !data.upgrades.includes(u.id));
+    if (weaponAvailable.length === 0) return;
+
+    const universalPool = UNIVERSAL_UPGRADES.filter(u => {
+        if (u.requires && !player.universalUpgrades.includes(u.requires)) return false;
+        if (!u.stackable && player.universalUpgrades.includes(u.id)) return false;
+        return true;
+    });
+    if (universalPool.length === 0) return;
 
     isUpgradeSelecting = true;
     upgradeSelectingWeapon = weaponType;
     isPaused = true;
 
+    let selectedWeaponId = null;
+    let selectedUniversalId = null;
+
     const overlay = document.getElementById('upgrade-selection');
     const weaponNameEl = document.getElementById('upgrade-weapon-name');
     const choicesEl = document.getElementById('upgrade-choices');
+    const universalChoicesEl = document.getElementById('upgrade-universal-choices');
 
     weaponNameEl.innerText = (WEAPONS[weaponType]?.name || weaponType).toUpperCase();
     choicesEl.innerHTML = '';
+    universalChoicesEl.innerHTML = '';
 
-    // Pick up to 3 random upgrades
-    const pool = [...available];
-    const picks = [];
-    while (pool.length > 0 && picks.length < 3) {
-        const idx = Math.floor(Math.random() * pool.length);
-        picks.push(pool.splice(idx, 1)[0]);
+    const weaponPool = [...weaponAvailable];
+    const weaponPicks = [];
+    while (weaponPool.length > 0 && weaponPicks.length < 3) {
+        const idx = Math.floor(Math.random() * weaponPool.length);
+        weaponPicks.push(weaponPool.splice(idx, 1)[0]);
     }
 
-    for (const up of picks) {
+    const uniPool = [...universalPool];
+    const universalPicks = [];
+    while (uniPool.length > 0 && universalPicks.length < 3) {
+        const idx = Math.floor(Math.random() * uniPool.length);
+        universalPicks.push(uniPool.splice(idx, 1)[0]);
+    }
+
+    function tryApply() {
+        if (selectedWeaponId && selectedUniversalId) {
+            applyUpgrade(weaponType, selectedWeaponId);
+            applyUniversalUpgrade(selectedUniversalId);
+            overlay.style.display = 'none';
+            isUpgradeSelecting = false;
+            upgradeSelectingWeapon = null;
+            isPaused = false;
+            updateUI();
+        }
+    }
+
+    for (const up of weaponPicks) {
         const btn = document.createElement('button');
         btn.className = 'upgrade-choice';
         btn.type = 'button';
+        btn.dataset.id = up.id;
         btn.innerHTML = `<div class=\"upgrade-title\">${up.name}</div><div class=\"upgrade-desc\">${up.description}</div>`;
-        btn.addEventListener('click', () => applyUpgrade(weaponType, up.id));
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#upgrade-choices .upgrade-choice').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedWeaponId = up.id;
+            tryApply();
+        });
         choicesEl.appendChild(btn);
+    }
+
+    for (const up of universalPicks) {
+        const btn = document.createElement('button');
+        btn.className = 'upgrade-choice';
+        btn.type = 'button';
+        btn.dataset.id = up.id;
+        btn.innerHTML = `<div class=\"upgrade-title\">${up.name}</div><div class=\"upgrade-desc\">${up.description}</div>`;
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#upgrade-universal-choices .upgrade-choice').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedUniversalId = up.id;
+            tryApply();
+        });
+        universalChoicesEl.appendChild(btn);
     }
 
     overlay.style.display = 'block';
@@ -440,20 +602,183 @@ function applyUpgrade(weaponType, upgradeId) {
 
     data.upgrades.push(upgradeId);
     data.level += 1;
+}
 
-    const overlay = document.getElementById('upgrade-selection');
-    overlay.style.display = 'none';
+function applyUniversalUpgrade(universalId) {
+    const up = UNIVERSAL_UPGRADES.find(u => u.id === universalId);
+    if (!up) return;
+    if (!up.stackable && player.universalUpgrades.includes(universalId)) return;
 
-    isUpgradeSelecting = false;
-    upgradeSelectingWeapon = null;
-    isPaused = false;
+    player.universalUpgrades.push(universalId);
 
+    if (universalId === 'unlock_dash') player.dashUnlocked = true;
+    if (universalId === 'unlock_focus') player.focusUnlocked = true;
+    if (universalId === 'unlock_grenades') player.grenadesUnlocked = true;
+    if (universalId === 'bonus_hp') {
+        player.maxHp += 10;
+        player.hp = Math.min(player.hp + 10, player.maxHp);
+    }
+    if (universalId === 'ammo_bonus') player.ammoBonusPercent += 10;
+}
+
+function handlePlayerDeath() {
+    if (isDeathScreenShowing || player.dead) return; // Prevent multiple calls
+    
+    // Mark player as dead
+    player.dead = true;
+    player.deathTimer = 0;
+    hasProcessedDeathScreen = false; // Reset flag
+    
+    // Create death animation
+    createPlayerDeathAnimation();
+    
+    // Set flag to prevent damage/spawning
+    isDeathScreenShowing = true;
+    
+    updateAborted = true;
+}
+
+let selectedWeaponForRespawn = null;
+
+function showDeathScreen() {
+    isDeathScreenShowing = true;
+    
+    const deathScreen = document.getElementById('death-screen');
+    const deathKills = document.getElementById('death-kills');
+    const deathLives = document.getElementById('death-lives');
+    const weaponChoices = document.getElementById('weapon-choices');
+    const universalUpgradesList = document.getElementById('universal-upgrades-list');
+    const continueBtn = document.getElementById('continue-btn');
+
+    // Reset selection
+    selectedWeaponForRespawn = null;
+    continueBtn.style.display = 'none';
+
+    // Show lives remaining
+    deathLives.innerText = `${lives} ${lives === 1 ? 'life' : 'lives'} remaining`;
+
+    // Show kills
+    deathKills.innerText = score;
+
+    // Show universal upgrades
+    if (player.universalUpgrades.length > 0) {
+        const universalNames = player.universalUpgrades.map(up => {
+            const upData = UNIVERSAL_UPGRADES.find(u => u.id === up);
+            return upData ? upData.name : up;
+        }).join(', ');
+        universalUpgradesList.innerText = universalNames;
+    } else {
+        universalUpgradesList.innerText = 'None';
+    }
+
+    // Build weapon selection
+    weaponChoices.innerHTML = '';
+    const availableWeapons = ['smg', 'shotgun', 'minigun', 'rocket', 'railgun'].filter(w => weaponKills[w] > 0);
+    if (availableWeapons.length === 0) {
+        availableWeapons.push('pistol');
+    }
+
+    const xpThresholds = [40, 200, 600];
+
+    availableWeapons.forEach(weaponType => {
+        const wp = WEAPONS[weaponType];
+        const weaponData = weaponXP[weaponType] || { xp: 0, level: 0, upgrades: [] };
+        const upgrades = weaponData.upgrades || [];
+        
+        // Calculate XP display
+        let xpDisplay = '';
+        if (weaponData.level >= 3) {
+            xpDisplay = '600/600';
+        } else {
+            const nextThreshold = xpThresholds[weaponData.level];
+            xpDisplay = `${weaponData.xp}/${nextThreshold}`;
+        }
+
+        // Get upgrade names
+        const upgradeNames = upgrades.map(upId => {
+            const upData = WEAPON_UPGRADES[weaponType]?.find(u => u.id === upId);
+            return upData ? upData.name : upId;
+        });
+
+        // Create weapon card
+        const card = document.createElement('div');
+        card.className = 'weapon-card';
+        card.style.cssText = 'background: rgba(0, 0, 0, 0.5); border: 2px solid #555; padding: 15px; min-width: 150px; cursor: pointer; text-align: center;';
+        
+        const weaponName = document.createElement('div');
+        weaponName.innerText = wp.name;
+        weaponName.style.cssText = `font-size: 18px; font-weight: bold; color: ${wp.color}; margin-bottom: 5px;`;
+        
+        const xpInfo = document.createElement('div');
+        xpInfo.innerText = xpDisplay;
+        xpInfo.style.cssText = 'font-size: 14px; color: #aaa; margin-bottom: 10px;';
+        
+        const upgradesDiv = document.createElement('div');
+        upgradesDiv.style.cssText = 'font-size: 12px; color: #888; text-align: left;';
+        if (upgradeNames.length > 0) {
+            upgradeNames.forEach(upName => {
+                const upLine = document.createElement('div');
+                upLine.innerText = upName;
+                upgradesDiv.appendChild(upLine);
+            });
+        } else {
+            upgradesDiv.innerText = 'No upgrades';
+        }
+
+        card.appendChild(weaponName);
+        card.appendChild(xpInfo);
+        card.appendChild(upgradesDiv);
+
+        card.onclick = () => {
+            // Remove previous selection highlight
+            weaponChoices.querySelectorAll('.weapon-card').forEach(c => {
+                c.style.borderColor = '#555';
+                c.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+            });
+            
+            // Highlight selected
+            card.style.borderColor = wp.color;
+            card.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            
+            selectedWeaponForRespawn = weaponType;
+            continueBtn.style.display = 'block';
+        };
+
+        weaponChoices.appendChild(card);
+    });
+
+    // Ensure game-over screen is hidden
+    document.getElementById('game-over').style.display = 'none';
+    
+    deathScreen.style.display = 'block';
+}
+
+function respawn() {
+    isDeathScreenShowing = false;
+    player.dead = false;
+    player.deathTimer = 0;
+    hasProcessedDeathScreen = false;
+    
+    player.hp = player.maxHp;
+    player.x = arena.x + arena.w / 2;
+    player.y = arena.y + arena.h / 2;
+    player.vx = 0;
+    player.vy = 0;
+    player.focusActive = false;
+    player.focus = player.maxFocus;
+    enemies.length = 0;
+    bullets.length = 0;
     updateUI();
 }
 
 function endGame() {
     isGameRunning = false;
     Audio.playGameOverMusic();
+    
+    // Hide death screen if it's showing
+    document.getElementById('death-screen').style.display = 'none';
+    
+    // Show game-over screen
     document.getElementById('game-over').style.display = 'block';
     document.getElementById('final-kills').innerText = score;
     document.getElementById('final-points').innerText = points;
@@ -481,11 +806,32 @@ function devSetShotgun() {
     toggleDevMenu();
 }
 
+function devSetMinigun() {
+    if (!isGameRunning) init();
+    setWeapon('minigun');
+    updateUI();
+    toggleDevMenu();
+}
+
+function devSetRocket() {
+    if (!isGameRunning) init();
+    setWeapon('rocket');
+    updateUI();
+    toggleDevMenu();
+}
+
+function devSetRailgun() {
+    if (!isGameRunning) init();
+    setWeapon('railgun');
+    updateUI();
+    toggleDevMenu();
+}
+
 function devForceLevelUp() {
     if (!isGameRunning) init();
     const wt = player.weapon;
     if (!weaponXP[wt]) return;
-    const thresholds = [30, 100, 500];
+    const thresholds = [40, 200, 600];
     const lvl = weaponXP[wt].level;
     if (lvl >= 3) return;
     weaponXP[wt].xp = Math.max(weaponXP[wt].xp, thresholds[lvl]);
@@ -536,15 +882,27 @@ function init() {
     player.vx = 0;
     player.vy = 0;
     player.hp = 100;
+    player.maxHp = 100;
+    player.dead = false;
+    player.deathTimer = 0;
     player.focus = 100;
     player.focusActive = false;
     player.weapon = 'pistol';
     player.ammo = Infinity;
     player.secondaryWeapon = null;
     player.secondaryAmmo = 0;
+    player.universalUpgrades = [];
+    player.dashUnlocked = false;
+    player.focusUnlocked = false;
+    player.grenadesUnlocked = false;
+    player.ammoBonusPercent = 0;
+
+    isDeathScreenShowing = false;
+    hasProcessedDeathScreen = false;
 
     score = 0;
     points = 0;
+    lives = 3;
     wave = 1;
     gameTime = 0;
     isPaused = false;
@@ -569,7 +927,17 @@ function init() {
 
     weaponXP = {
         smg: { xp: 0, level: 0, upgrades: [] },
-        shotgun: { xp: 0, level: 0, upgrades: [] }
+        shotgun: { xp: 0, level: 0, upgrades: [] },
+        minigun: { xp: 0, level: 0, upgrades: [] },
+        rocket: { xp: 0, level: 0, upgrades: [] },
+        railgun: { xp: 0, level: 0, upgrades: [] }
+    };
+    weaponKills = {
+        smg: 0,
+        shotgun: 0,
+        minigun: 0,
+        rocket: 0,
+        railgun: 0
     };
     weaponShotCount = { smg: 0 };
     isUpgradeSelecting = false;
@@ -598,10 +966,12 @@ function init() {
     gameContext.mines = mines;
     gameContext.turrets = turrets;
     gameContext.godMode = godMode;
+    gameContext.isDeathScreenShowing = isDeathScreenShowing;
     gameContext.noisePos = null;
     gameContext.shakeX = 0;
     gameContext.shakeY = 0;
     gameContext.endGame = endGame;
+    gameContext.handlePlayerDeath = handlePlayerDeath;
     gameContext.killEnemy = killEnemy;
     gameContext.createExplosion = createExplosion;
     gameContext.detonateNuke = detonateNuke;
@@ -653,7 +1023,7 @@ window.addEventListener('keydown', e => {
     if (e.key === 'l' || e.key === 'L') toggleDevMenu();
     if (e.key === 'p' || e.key === 'P') togglePause();
     if (e.key === 'm' || e.key === 'M') Audio.toggleMute();
-    if (e.key === 'Shift' && isGameRunning) { if (!player.focusActive && player.focus >= player.maxFocus) { player.focusActive = true; Audio.slowMoStart(); } }
+    if (e.key === 'Shift' && isGameRunning && player.focusUnlocked) { if (!player.focusActive && player.focus >= player.maxFocus) { player.focusActive = true; Audio.slowMoStart(); } }
 });
 window.addEventListener('keyup', e => setKey(e.key, false));
 window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
@@ -663,8 +1033,27 @@ window.addEventListener('mouseup', (e) => { if (e.button === 0) mouse.left = fal
 document.getElementById('start-btn').addEventListener('click', startGame);
 document.getElementById('resume-btn').addEventListener('click', togglePause);
 document.getElementById('restart-btn').addEventListener('click', restartGame);
+document.getElementById('continue-btn').addEventListener('click', () => {
+    const deathScreen = document.getElementById('death-screen');
+    
+    if (selectedWeaponForRespawn) {
+        setWeapon(selectedWeaponForRespawn);
+        const upgrades = (weaponXP[selectedWeaponForRespawn] && weaponXP[selectedWeaponForRespawn].upgrades) ? weaponXP[selectedWeaponForRespawn].upgrades : [];
+        const w = getWeaponStats(selectedWeaponForRespawn, upgrades, player.ammoBonusPercent || 0) || WEAPONS[selectedWeaponForRespawn];
+        player.ammo = w.maxCarry;
+        updateUI();
+        deathScreen.style.display = 'none';
+        isPaused = false;
+        isGameRunning = true;
+        respawn();
+        selectedWeaponForRespawn = null;
+    }
+});
 document.getElementById('dev-set-smg').addEventListener('click', devSetSmg);
 document.getElementById('dev-set-shotgun').addEventListener('click', devSetShotgun);
+document.getElementById('dev-set-minigun').addEventListener('click', devSetMinigun);
+document.getElementById('dev-set-rocket').addEventListener('click', devSetRocket);
+document.getElementById('dev-set-railgun').addEventListener('click', devSetRailgun);
 document.getElementById('dev-force-levelup').addEventListener('click', devForceLevelUp);
 document.getElementById('dev-boss-fight').addEventListener('click', devBossFight);
 document.getElementById('dev-max-ammo').addEventListener('click', devMaxAmmo);
@@ -676,22 +1065,33 @@ document.getElementById('dev-change-track').addEventListener('click', devChangeT
 function update(realTime) {
     if (!isGameRunning || isPaused) return;
     if (hitStop > 0) { hitStop--; return; }
+    updateAborted = false;
 
     gameContext.wave = wave;
     gameContext.noisePos = noisePos;
     gameContext.shakeX = shakeX;
     gameContext.shakeY = shakeY;
+    gameContext.isDeathScreenShowing = isDeathScreenShowing;
 
     let dt = 1.0;
     if (player.focusActive) {
-        dt = SLOW_MO_FACTOR; player.focus -= FOCUS_DRAIN;
+        const focusDrain = player.universalUpgrades && player.universalUpgrades.includes('double_focus') ? FOCUS_DRAIN * 0.5 : FOCUS_DRAIN;
+        dt = SLOW_MO_FACTOR; player.focus -= focusDrain;
         if (player.focus <= 0) { player.focus = 0; player.focusActive = false; Audio.slowMoEnd(); }
     } else {
         if (player.focus < player.maxFocus) { player.focus += FOCUS_REGEN; if (player.focus > player.maxFocus) player.focus = player.maxFocus; }
     }
+    
+    // Process player death animation and delay
+    if (player.dead) {
+        processPlayerDeath(dt);
+    }
 
-    document.getElementById('dash-fill').style.width = Math.min(100, (Math.min(1, (gameTime - (lastDashTime + DASH_DURATION)) / DASH_COOLDOWN)) * 100) + '%';
-    document.getElementById('focus-fill').style.width = player.focus + '%';
+    const effectiveDashCooldown = (player.universalUpgrades && player.universalUpgrades.includes('dash_cooldown')) ? DASH_COOLDOWN * 0.5 : DASH_COOLDOWN;
+    document.getElementById('dash-fill').style.width = player.dashUnlocked ? (Math.min(100, (Math.min(1, (gameTime - (lastDashTime + DASH_DURATION)) / effectiveDashCooldown)) * 100) + '%') : '0%';
+    document.getElementById('focus-fill').style.width = (player.focusUnlocked ? player.focus : 0) + '%';
+    document.getElementById('dash-bar-group').classList.toggle('locked', !player.dashUnlocked);
+    document.getElementById('focus-bar-group').classList.toggle('locked', !player.focusUnlocked);
 
     gameTime += 16.6 * dt;
 
@@ -702,73 +1102,95 @@ function update(realTime) {
     camera.x = Math.max(0, Math.min(WORLD_SIZE - width, camera.x));
     camera.y = Math.max(0, Math.min(WORLD_SIZE - height, camera.y));
 
-    if (wave >= 10 && arena.targetW < WORLD_SIZE - 200) { arena.targetW = WORLD_SIZE - 200; arena.targetH = WORLD_SIZE - 200; }
     if (arena.w < arena.targetW) {
         arena.w += 2 * dt; arena.h += 2 * dt;
         arena.x = (WORLD_SIZE - arena.w) / 2; arena.y = (WORLD_SIZE - arena.h) / 2;
     }
 
     const weaponUpgrades = (weaponXP[player.weapon] && weaponXP[player.weapon].upgrades) ? weaponXP[player.weapon].upgrades : [];
-    const wp = getWeaponStats(player.weapon, weaponUpgrades) || WEAPONS[player.weapon];
+    const wp = getWeaponStats(player.weapon, weaponUpgrades, player.ammoBonusPercent || 0) || WEAPONS[player.weapon];
 
-    let ix = 0; let iy = 0;
-    if (keys.w) iy -= 1; if (keys.s) iy += 1;
-    if (keys.a) ix -= 1; if (keys.d) ix += 1;
-    if (ix !== 0 || iy !== 0) {
-        const len = Math.hypot(ix, iy);
-        ix /= len; iy /= len;
-    }
-
-    player.vx += ix * PLAYER_ACCEL * dt;
-    player.vy += iy * PLAYER_ACCEL * dt;
-
-    const frictionFactor = Math.pow(PLAYER_FRICTION, dt);
-    player.vx *= frictionFactor;
-    player.vy *= frictionFactor;
-
-    player.x += player.vx * dt;
-    player.y += player.vy * dt;
-
-    if (player.x < arena.x + 10) { player.x = arena.x + 10; player.vx = 0; }
-    if (player.x > arena.x + arena.w - 10) { player.x = arena.x + arena.w - 10; player.vx = 0; }
-    if (player.y < arena.y + 10) { player.y = arena.y + 10; player.vy = 0; }
-    if (player.y > arena.y + arena.h - 10) { player.y = arena.y + arena.h - 10; player.vy = 0; }
-
-    const mouseWorldX = mouse.x + camera.x; const mouseWorldY = mouse.y + camera.y;
-    player.angle = Math.atan2(mouseWorldY - player.y, mouseWorldX - player.x);
-
-    let isDashing = (gameTime - lastDashTime < DASH_DURATION);
-    const dashP = Math.min(1, (gameTime - (lastDashTime + DASH_DURATION)) / DASH_COOLDOWN);
-    if (keys.space && !isDashing && dashP >= 1) {
-        lastDashTime = gameTime;
-        isDashing = true;
-        let dashDirX = ix; let dashDirY = iy;
-        if (dashDirX === 0 && dashDirY === 0) {
-            dashDirX = Math.cos(player.angle);
-            dashDirY = Math.sin(player.angle);
-        }
-        player.vx += dashDirX * DASH_IMPULSE;
-        player.vy += dashDirY * DASH_IMPULSE;
-        for (let i = 0; i < 10; i++) particles.push(new Particle(player.x, player.y, '#ffffff', 5));
-        Audio.dash();
-    }
-
-    let shouldFire = false;
-    if (mouse.left) {
-        if (player.weapon === 'minigun') {
-            if (player.minigunWindup === 0) Audio.minigunWindup();
-            player.minigunWindup += dt * 16.6;
-            player.minigunSoundTimer += dt * 16.6;
-            if (player.minigunSoundTimer > 100) { Audio.minigunSpin(); player.minigunSoundTimer = 0; }
-            if (player.minigunWindup > 500) shouldFire = true;
-        } else {
-            shouldFire = true;
-        }
-    } else {
+    if (mouse.left && player.weapon === 'minigun') {
+        if (player.minigunWindup === 0) Audio.minigunWindup();
+        player.minigunWindup += dt * 16.6;
+        player.minigunSoundTimer += dt * 16.6;
+        if (player.minigunSoundTimer > 100) { Audio.minigunSpin(); player.minigunSoundTimer = 0; }
+    } else if (!mouse.left) {
         player.minigunWindup = 0;
     }
 
-    if (shouldFire && gameTime - lastShotTime > wp.rate) {
+    player.walkingTankActive = false;
+    let shouldFire = false;
+    if (mouse.left) {
+        if (player.weapon === 'minigun') {
+            const hasSuperSpin = weaponUpgrades.includes('minigun_super_spin');
+            const spinUpRequired = hasSuperSpin ? 1000 : 500;
+            if (player.minigunWindup > spinUpRequired) shouldFire = true;
+            if (shouldFire && weaponUpgrades.includes('minigun_walking_tank')) player.walkingTankActive = true;
+        } else {
+            shouldFire = true;
+        }
+    }
+
+    // Only allow movement if player is not dead
+    if (!player.dead) {
+        let ix = 0; let iy = 0;
+        if (keys.w) iy -= 1; if (keys.s) iy += 1;
+        if (keys.a) ix -= 1; if (keys.d) ix += 1;
+        if (ix !== 0 || iy !== 0) {
+            const len = Math.hypot(ix, iy);
+            ix /= len; iy /= len;
+        }
+
+        const accelMult = (player.walkingTankActive) ? 0.5 : 1;
+        player.vx += ix * PLAYER_ACCEL * accelMult * dt;
+        player.vy += iy * PLAYER_ACCEL * accelMult * dt;
+
+        const frictionFactor = Math.pow(PLAYER_FRICTION, dt);
+        player.vx *= frictionFactor;
+        player.vy *= frictionFactor;
+
+        player.x += player.vx * dt;
+        player.y += player.vy * dt;
+
+        if (player.x < arena.x + 10) { player.x = arena.x + 10; player.vx = 0; }
+        if (player.x > arena.x + arena.w - 10) { player.x = arena.x + arena.w - 10; player.vx = 0; }
+        if (player.y < arena.y + 10) { player.y = arena.y + 10; player.vy = 0; }
+        if (player.y > arena.y + arena.h - 10) { player.y = arena.y + arena.h - 10; player.vy = 0; }
+
+        const mouseWorldX = mouse.x + camera.x; const mouseWorldY = mouse.y + camera.y;
+        player.angle = Math.atan2(mouseWorldY - player.y, mouseWorldX - player.x);
+
+        let isDashing = (gameTime - lastDashTime < DASH_DURATION);
+        const dashP = Math.min(1, (gameTime - (lastDashTime + DASH_DURATION)) / effectiveDashCooldown);
+        if (player.dashUnlocked && keys.space && !isDashing && dashP >= 1) {
+            lastDashTime = gameTime;
+            isDashing = true;
+            let dashDirX = ix; let dashDirY = iy;
+            if (dashDirX === 0 && dashDirY === 0) {
+                dashDirX = Math.cos(player.angle);
+                dashDirY = Math.sin(player.angle);
+            }
+            player.vx += dashDirX * DASH_IMPULSE;
+            player.vy += dashDirY * DASH_IMPULSE;
+            for (let i = 0; i < 10; i++) particles.push(new Particle(player.x, player.y, '#ffffff', 5));
+            Audio.dash();
+        }
+    }
+
+    let effectiveRate = wp.rate;
+    if (player.weapon === 'minigun' && weaponUpgrades.includes('minigun_super_spin')) {
+        const ramp = Math.min(1, Math.max(0, (player.minigunWindup - 1000) / 5000));
+        const fireRateMult = 1 + 3 * ramp;
+        effectiveRate = wp.rate / fireRateMult;
+    }
+    if (player.weapon === 'railgun' && weaponUpgrades.includes('railgun_hot_battery')) {
+        const ammoPct = wp.maxCarry > 0 ? player.ammo / wp.maxCarry : 1;
+        const rateMult = 1.01 + ammoPct * 1.79;
+        effectiveRate = wp.rate / rateMult;
+    }
+
+    if (shouldFire && gameTime - lastShotTime > effectiveRate && !player.dead) {
         if (player.ammo > 0) {
             const mx = player.x + Math.cos(player.angle) * 20; const my = player.y + Math.sin(player.angle) * 20;
             let spreadFactor = wp.spread;
@@ -797,12 +1219,29 @@ function update(realTime) {
                     b.maxPierces = 2;
                     b.limitedPierce = true;
                 }
+                if (wp.knockbackMult) b.knockbackMult = wp.knockbackMult;
+                if (player.weapon === 'rocket') {
+                    b.explosionOptions = {};
+                    if (weaponUpgrades.includes('rocket_shrapnel')) b.explosionOptions.shrapnel = true;
+                    if (weaponUpgrades.includes('rocket_high_explosives')) b.explosionOptions.rangeMult = 2;
+                    if (weaponUpgrades.includes('rocket_cluster_rockets')) b.explosionOptions.cluster = true;
+                }
+                if (player.weapon === 'railgun') {
+                    const hasTungsten = weaponUpgrades.includes('railgun_tungsten_dart');
+                    if (!hasTungsten) b.maxPierces = 5;
+                    else {
+                        b.tungstenDart = true;
+                        b.baseDamage = wp.damage;
+                    }
+                }
 
                 bullets.push(b);
             }
-            player.vx -= Math.cos(player.angle) * wp.recoil;
-            player.vy -= Math.sin(player.angle) * wp.recoil;
-            shakeX = Math.cos(player.angle + Math.PI) * wp.recoil; shakeY = Math.sin(player.angle + Math.PI) * wp.recoil;
+            if (!player.walkingTankActive) {
+                player.vx -= Math.cos(player.angle) * wp.recoil;
+                player.vy -= Math.sin(player.angle) * wp.recoil;
+                shakeX = Math.cos(player.angle + Math.PI) * wp.recoil; shakeY = Math.sin(player.angle + Math.PI) * wp.recoil;
+            }
             noisePos = { x: player.x, y: player.y }; lastShotTime = gameTime;
             particles.push(new Particle(player.x, player.y, '#aa8800', 3));
             if (player.weapon === 'shotgun') Audio.shotgun(); else if (player.weapon === 'rocket') Audio.rocket(); else Audio.shoot();
@@ -830,7 +1269,7 @@ function update(realTime) {
                 if (player.secondaryAmmo <= 0) player.secondaryWeapon = null;
                 updateUI();
             }
-        } else {
+        } else if (player.grenadesUnlocked) {
             const cdPercent = Math.min(1, (gameTime - lastGrenadeTime) / GRENADE_COOLDOWN);
             if (cdPercent >= 1) {
                  grenades.push(new Grenade(player.x, player.y, player.angle));
@@ -865,11 +1304,22 @@ function update(realTime) {
         if (b.isEnemy && !remove) {
             const dist = Math.hypot(b.x - player.x, b.y - player.y);
             if (dist < 15) {
-                if (!godMode) { player.hp -= b.damage; updateUI(); Audio.playerDamage(); shakeX = 5; shakeY = 5; if (player.hp <= 0) endGame(); }
+                if (!godMode && !isDeathScreenShowing) {
+                    let dmg = b.damage;
+                    if (player.walkingTankActive) dmg *= 0.2;
+                    player.hp -= dmg; updateUI(); Audio.playerDamage(); shakeX = 5; shakeY = 5; if (player.hp <= 0) { handlePlayerDeath(); return; }
+                }
                 remove = true;
             }
         }
-        if (remove) { if (b.explosive) createExplosion(b.x, b.y); bullets.splice(i, 1); }
+        if (remove) {
+            if (b.explosive) {
+                const opts = b.explosionOptions || {};
+                if (opts.cluster) opts.clusterAngle = b.angle;
+                createExplosion(b.x, b.y, false, false, opts);
+            }
+            bullets.splice(i, 1);
+        }
     }
 
     for (let i = grenades.length - 1; i >= 0; i--) {
@@ -905,9 +1355,11 @@ function update(realTime) {
     }
 
     if (gameTime - lastSpawnTime > Math.max(150, SPAWN_RATE - wave * 25)) {
-        if (wave === 5 && Math.random() < 0.2) for (let k = 0; k < 3; k++) enemies.push(new Enemy('flanker'));
-        else enemies.push(new Enemy());
-        lastSpawnTime = gameTime;
+        if (!isDeathScreenShowing) {
+            if (wave === 5 && Math.random() < 0.2) for (let k = 0; k < 3; k++) enemies.push(new Enemy('flanker'));
+            else enemies.push(new Enemy());
+            lastSpawnTime = gameTime;
+        }
     }
 
     let nukeInPlay = false; for (let p of pickups) { if (p.type === 'nuke') nukeInPlay = true; }
@@ -917,7 +1369,7 @@ function update(realTime) {
     for (let i = pickups.length - 1; i >= 0; i--) {
         pickups[i].update(dt); if (pickups[i].life <= 0) { pickups.splice(i, 1); continue; }
         if (pickups[i].type === 'nuke') { const d = Math.hypot(pickups[i].x - player.x, pickups[i].y - player.y); if (d < nukeDist) nukeDist = d; }
-        if (Math.hypot(player.x - pickups[i].x, player.y - pickups[i].y) < 25) {
+        if (Math.hypot(player.x - pickups[i].x, player.y - pickups[i].y) < 25 && !player.dead) {
             const p = pickups[i];
             if (p.type === 'nuke') detonateNuke(p.x, p.y);
             else if (p.type === 'medikit') { player.hp = Math.min(player.maxHp, player.hp + 25); updateUI(); Audio.pickup(); for (let k = 0; k < 10; k++) particles.push(new Particle(player.x, player.y, '#00ff00', 5)); }
@@ -934,8 +1386,9 @@ function update(realTime) {
     }
 
     for (let i = enemies.length - 1; i >= 0; i--) {
-        let e = enemies[i]; if (e.dead) { enemies.splice(i, 1); continue; }
+        let e = enemies[i]; if (!e) continue; if (e.dead) { enemies.splice(i, 1); continue; }
         e.update(dt);
+        if (updateAborted) return;
         for (let j = bullets.length - 1; j >= 0; j--) {
             let b = bullets[j]; if (b.isEnemy) continue;
             const hitBox = e.type === 'boss' ? 80 : 40;
@@ -944,9 +1397,17 @@ function update(realTime) {
             const dist = Math.hypot(e.x - b.x, e.y - b.y);
             if (dist < e.radius + 10) {
                 let damageCalc = superDamage ? 999999 : b.damage;
+                if (b.tungstenDart && b.baseDamage !== undefined) {
+                    damageCalc = b.baseDamage * Math.max(0.1, 1 - (b.hitList?.length || 0) * 0.1);
+                }
 
                 if (e.type === 'tank') {
+                     const wasAggro = e.tankState === 'aggro';
                      e.tankState = 'aggro'; e.aggroTime = 900;
+                     if (!wasAggro) {
+                         shakeX = 10; shakeY = 10;
+                         for (let k = 0; k < 15; k++) particles.push(new Particle(e.x, e.y, '#ff0000', 8));
+                     }
                      let diff = Math.abs(normalizeAngle(b.angle - e.facing));
                      if (diff < Math.PI / 3) { damageCalc *= 5; Audio.crit(); for (let k = 0; k < 5; k++) particles.push(new Particle(e.x, e.y, '#ffaa00', 8)); }
                 } else if (e.type === 'boss') {
@@ -962,16 +1423,53 @@ function update(realTime) {
                     }
                 }
                 e.hp -= damageCalc;
-                if (b.explosive) { createExplosion(b.x, b.y); bullets.splice(j, 1); }
+                if (b.weaponType === 'railgun' && weaponUpgrades.includes('railgun_tesla_arc')) {
+                    const zapRange = 100;
+                    if (e.type !== 'boss' && !e.stunned) {
+                        e.stunned = true;
+                        e.stunTimer = 3000;
+                    }
+                    for (let other of enemies) {
+                        if (other === e || other.dead || other.dying || other.type === 'boss' || other.stunned) continue;
+                        const zapDist = Math.hypot(other.x - e.x, other.y - e.y);
+                        if (zapDist < zapRange) {
+                            other.stunned = true;
+                            other.stunTimer = 3000;
+                            for (let k = 0; k < 5; k++) {
+                                particles.push(new Particle(e.x + (other.x - e.x) * 0.5, e.y + (other.y - e.y) * 0.5, '#00aaff', 8));
+                            }
+                        }
+                    }
+                    for (let k = 0; k < 8; k++) particles.push(new Particle(e.x, e.y, '#00aaff', 10));
+                }
+                if (b.explosive) {
+                    const opts = b.explosionOptions || {};
+                    if (opts.cluster) opts.clusterAngle = b.angle;
+                    createExplosion(b.x, b.y, false, false, opts);
+                    bullets.splice(j, 1);
+                }
                 else if (b.pierce) {
                     b.hitList.push(e);
-                    for (let k = 0; k < 3; k++) particles.push(new Particle(e.x, e.y, e.color, 5));
+                    const particleCount = e.hp > 0 ? 7 : 3;
+                    const particleColor = e.hp > 0 ? '#660000' : e.color;
+                    const particleSpeed = e.hp > 0 ? 8 : 5;
+                    for (let k = 0; k < particleCount; k++) particles.push(new Particle(e.x, e.y, particleColor, particleSpeed));
                     if (b.maxPierces && b.hitList.length >= b.maxPierces) {
                         bullets.splice(j, 1);
                     }
                 }
                 else {
-                    if (e.type !== 'boss') { const kb = (e.type === 'tank' ? 2 : 8); e.vx += Math.cos(b.angle) * kb; e.vy += Math.sin(b.angle) * kb; }
+                    if (e.type !== 'boss') { const kb = (e.type === 'tank' ? 2 : 8) * (b.knockbackMult || 1); e.vx += Math.cos(b.angle) * kb; e.vy += Math.sin(b.angle) * kb; }
+                    if (b.weaponType === 'minigun' && weaponUpgrades.includes('minigun_splinter_bullets') && !b.isSplinter) {
+                        const splinterDmg = b.damage * 0.3;
+                        const wp = getWeaponStats('minigun', weaponUpgrades, player.ammoBonusPercent || 0) || WEAPONS.minigun;
+                        for (let k = 0; k < 3; k++) {
+                            const spreadAng = (k - 1) * (Math.PI / 3);
+                            const splinter = new Bullet(e.x, e.y, b.angle + spreadAng, wp.speed, wp.color, splinterDmg, false, false, false, 'minigun');
+                            splinter.isSplinter = true;
+                            bullets.push(splinter);
+                        }
+                    }
                     bullets.splice(j, 1); for (let k = 0; k < 3; k++) particles.push(new Particle(e.x, e.y, e.color, 5));
                 }
                 noisePos = { x: e.x, y: e.y }; Audio.hit();
@@ -993,8 +1491,10 @@ function update(realTime) {
         if (enemies[i] && !enemies[i].dead && !enemies[i].dying) {
             const pDist = Math.hypot(enemies[i].x - player.x, enemies[i].y - player.y);
             if (pDist < enemies[i].radius + 15) {
-                if (!godMode) {
-                    player.hp -= 10; updateUI(); Audio.playerDamage(); shakeX = (Math.random()-0.5) * 20; shakeY = (Math.random()-0.5) * 20; if (player.hp <= 0) endGame();
+                if (!godMode && !isDeathScreenShowing) {
+                    let dmg = 10;
+                    if (player.walkingTankActive) dmg *= 0.2;
+                    player.hp -= dmg; updateUI(); Audio.playerDamage(); shakeX = (Math.random()-0.5) * 20; shakeY = (Math.random()-0.5) * 20; if (player.hp <= 0) { handlePlayerDeath(); return; }
                 }
                 const angle = Math.atan2(player.y - enemies[i].y, player.x - enemies[i].x);
                 let kbForce = 10;
@@ -1106,12 +1606,19 @@ function draw() {
     enemies.forEach(e => e.draw(ctx));
     bullets.forEach(b => b.draw(ctx));
 
-    ctx.save();
-    ctx.translate(player.x, player.y); ctx.rotate(player.angle);
-    ctx.fillStyle = '#44ff44'; ctx.shadowBlur = 0;
-    ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI*2); ctx.fill();
-    drawWeapon(ctx, player.weapon);
-    ctx.restore();
+    // Only draw player if not dead
+    if (!player.dead) {
+        ctx.save();
+        ctx.translate(player.x, player.y); ctx.rotate(player.angle);
+        const t = 1 - (player.hp / (player.maxHp || 100));
+        const r = Math.round(68 + (255 - 68) * t);
+        const g = Math.round(255 - 255 * t);
+        const bCol = Math.round(68 - 68 * t);
+        ctx.fillStyle = `rgb(${r},${g},${bCol})`; ctx.shadowBlur = 0;
+        ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI*2); ctx.fill();
+        drawWeapon(ctx, player.weapon);
+        ctx.restore();
+    }
 
     particles.forEach(p => p.draw(ctx));
     ctx.restore();
@@ -1125,7 +1632,9 @@ function draw() {
                 if (tx < 30) tx = 30; if (tx > width-30) tx = width-30; if (ty < 30) ty = 30; if (ty > height-30) ty = height-30;
                 ctx.save(); ctx.translate(tx, ty); ctx.rotate(angle);
                 const pulse = 1 + Math.sin(Date.now() / 100) * 0.2; ctx.scale(pulse, pulse);
+                ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 15;
                 ctx.fillStyle = '#ffff00'; ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-10, 10); ctx.lineTo(-10, -10); ctx.fill();
+                ctx.shadowBlur = 0;
                 ctx.fillStyle = '#000'; ctx.font = '12px Arial'; ctx.textAlign = 'right'; ctx.fillText('NUKE', -15, 4);
                 ctx.restore();
             }

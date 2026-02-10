@@ -3,7 +3,7 @@ import { Audio } from './audio.js';
 
 export const PLAYER_ACCEL = 0.45;
 export const PLAYER_FRICTION = 0.87;
-export const DASH_COOLDOWN = 3750;
+export const DASH_COOLDOWN = 7500;
 export const DASH_DURATION = 150;
 export const DASH_IMPULSE = 12;
 export const GRENADE_COOLDOWN = 3000;
@@ -17,7 +17,7 @@ export const WEAPONS = {
     shotgun:{ name: 'SHOTGUN',tier: 1, rate: 1500, speed: 11, damage: 2, spread: 0.35, count: 7, color: '#ffff00', recoil: 4.0, ammo: 24, maxCarry: 72 },
     minigun:{ name: 'MINIGUN',tier: 2, rate: 55,  speed: 14, damage: 2.7, spread: 0.15, count: 1, color: '#00ffff', recoil: 0.8, ammo: 300, maxCarry: 900 },
     rocket: { name: 'ROCKET', tier: 2, rate: 1200, speed: 8,  damage: 20, spread: 0,    count: 1, color: '#ff4444', recoil: 6.0, ammo: 12, maxCarry: 36, explosive: true },
-    railgun:{ name: 'RAILGUN',tier: 3, rate: 1500, speed: 30, damage: 50, spread: 0,    count: 1, color: '#ff00ff', recoil: 0, ammo: 12, maxCarry: 36, pierce: true }
+    railgun:{ name: 'RAILGUN',tier: 3, rate: 2400, speed: 30, damage: 50, spread: 0,    count: 1, color: '#ff00ff', recoil: 0, ammo: 12, maxCarry: 36, pierce: true }
 };
 
 export const SECONDARIES = {
@@ -53,17 +53,32 @@ export const WEAPON_UPGRADES = {
         {
             id: 'shotgun_jackhammer',
             name: 'Jackhammer',
-            description: '+100% fire rate, +100% ammo from box, +100% max ammo.'
+            description: '+100% fire rate, +50% ammo from box, +50% max ammo.'
         },
         {
             id: 'shotgun_elephant_shot',
             name: 'Elephant shot',
-            description: '+100% damage.'
+            description: '+100% damage, +100% knockback, +20% recoil.'
         }
+    ],
+    minigun: [
+        { id: 'minigun_splinter_bullets', name: 'Splinter Bullets', description: 'Bullets split into 3 on hit, each dealing 30% damage.' },
+        { id: 'minigun_super_spin', name: 'Super Spin', description: '1s spin-up. +50% ammo. Fire rate ramps to 400% over 5s.' },
+        { id: 'minigun_walking_tank', name: 'Walking Tank', description: 'When firing: -50% movement, no recoil, -80% received damage.' }
+    ],
+    rocket: [
+        { id: 'rocket_shrapnel', name: 'Shrapnel', description: 'Explosions launch 10 shotgun pellets in all directions.' },
+        { id: 'rocket_high_explosives', name: 'High Explosives', description: 'Double effective range. -30% fire rate.' },
+        { id: 'rocket_cluster_rockets', name: 'Cluster Rockets', description: 'Explosion sends 3 minirockets forward with spread.' }
+    ],
+    railgun: [
+        { id: 'railgun_tungsten_dart', name: 'Tungsten Dart', description: 'Infinite penetration. Damage drops 10% per hit (min 10%).' },
+        { id: 'railgun_hot_battery', name: 'Hot Battery', description: '+180% fire rate at full ammo, drops to +1% at 1 ammo.' },
+        { id: 'railgun_tesla_arc', name: 'Tesla-Arc', description: 'Railgun shots zap nearby enemies, stunning them for 3s. Boss immune.' }
     ]
 };
 
-export function getWeaponStats(weaponType, upgrades = []) {
+export function getWeaponStats(weaponType, upgrades = [], ammoBonusPercent = 0) {
     const base = WEAPONS[weaponType];
     if (!base) return null;
     const stats = { ...base };
@@ -83,12 +98,28 @@ export function getWeaponStats(weaponType, upgrades = []) {
         }
         if (up === 'shotgun_jackhammer') {
             stats.rate *= 0.5;
-            stats.ammo *= 2;
-            stats.maxCarry *= 2;
+            stats.ammo *= 1.5;
+            stats.maxCarry *= 1.5;
         }
         if (up === 'shotgun_elephant_shot') {
             stats.damage *= 2;
+            stats.knockbackMult = (stats.knockbackMult || 1) * 2;
+            stats.recoil *= 1.2;
         }
+        if (up === 'minigun_super_spin') {
+            stats.ammo *= 2.0;
+            stats.maxCarry *= 2.0;
+        }
+        if (up === 'rocket_high_explosives') {
+            stats.explosionRangeMult = (stats.explosionRangeMult || 1) * 2;
+            stats.rate *= 1.3;
+        }
+    }
+
+    if (ammoBonusPercent > 0 && stats.ammo !== Infinity) {
+        const mult = 1 + ammoBonusPercent / 100;
+        stats.ammo = Math.round(stats.ammo * mult);
+        stats.maxCarry = Math.round(stats.maxCarry * mult);
     }
 
     return stats;
@@ -103,20 +134,45 @@ export function normalizeAngle(angle) {
 export class Bullet {
     constructor(x, y, angle, speed, color, damage, explosive = false, pierce = false, isEnemy = false, weaponType = null) {
         this.x = x; this.y = y; this.angle = angle;
+        this.speed = speed;
         this.vx = Math.cos(angle) * speed; this.vy = Math.sin(angle) * speed;
         this.life = 60; this.color = color; this.damage = damage;
         this.explosive = explosive; this.pierce = pierce; this.isEnemy = isEnemy; this.hitList = [];
         this.weaponType = weaponType;
+        this.homing = false;
     }
     update(dt) {
+        if (this.homing && gameContext.enemies && gameContext.enemies.length > 0) {
+            let best = null; let bestD = Infinity;
+            for (const e of gameContext.enemies) {
+                if (e.dead || e.dying) continue;
+                const d = Math.hypot(e.x - this.x, e.y - this.y);
+                if (d < bestD && d > 5) { bestD = d; best = e; }
+            }
+            if (best) {
+                const targetAngle = Math.atan2(best.y - this.y, best.x - this.x);
+                const turn = 0.08 * dt;
+                this.angle = normalizeAngle(this.angle + Math.sign(normalizeAngle(targetAngle - this.angle)) * Math.min(turn, Math.abs(normalizeAngle(targetAngle - this.angle))));
+                this.vx = Math.cos(this.angle) * this.speed;
+                this.vy = Math.sin(this.angle) * this.speed;
+            }
+        }
         this.x += this.vx * dt; this.y += this.vy * dt; this.life -= 1 * dt;
     }
     draw(ctx) {
         ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
         ctx.fillStyle = this.color;
         if (this.pierce && !this.limitedPierce) {
-            ctx.fillStyle = '#ffffff'; ctx.fillRect(-40, -3, 80, 6);
-            ctx.fillStyle = this.color; ctx.globalAlpha = 0.6; ctx.fillRect(-50, -6, 100, 12);
+            const hits = this.hitList?.length || 0;
+            let scale = 1;
+            if (this.tungstenDart && this.baseDamage) {
+                scale = Math.max(0.1, 1 - hits * 0.1);
+            } else {
+                scale = Math.max(0.2, 1 - (hits / 5) * 0.8);
+            }
+            const w = 80 * scale, h = 6 * scale;
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(-w/2, -h/2, w, h);
+            ctx.fillStyle = this.color; ctx.globalAlpha = 0.6; ctx.fillRect(-w/2 - 10, -h/2 - 3, w + 20, h + 6);
         } else if (this.explosive) {
             ctx.fillRect(-8, -3, 16, 6); ctx.fillStyle = '#ff8800'; ctx.fillRect(-8, -1, 4, 2);
         } else if (this.isEnemy) {

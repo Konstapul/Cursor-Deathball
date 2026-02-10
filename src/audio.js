@@ -345,6 +345,7 @@ const Audio = (function() {
         mineExplode: () => { if(ctx && muteState!==2) { playTone(60,'square',0.5,0.4); playNoise(0.8,0.4); }},
         hit: () => { if(ctx && muteState!==2) playTone(100,'sawtooth',0.1,0.05); },
         playerDamage: () => { if(ctx && muteState!==2) { playNoise(0.15,0.6); playTone(400,'sawtooth',0.1,0.4); }},
+        playerDeath: () => { if(ctx && muteState!==2) { playNoise(0.3,0.8); playTone(200,'sawtooth',0.3,0.5); }},
         crit: () => { if(ctx && muteState!==2) playTone(800,'square',0.1,0.1); },
         dash: () => { if(ctx && muteState!==2) playTone(600,'sine',0.2,0.05); },
         pickup: () => { if(ctx && muteState!==2) playTone(800,'sine',0.2,0.1,false); },
@@ -378,7 +379,8 @@ const Audio = (function() {
         },
         minigunSpin: () => { if(ctx && muteState!==2) playTone(80,'square',0.1,0.05); },
         mineSet: () => { if(ctx && muteState!==2) playTone(1200,'sine',0.1,0.1); },
-        turretFire: () => { if(ctx && muteState!==2) playTone(800,'square',0.05,0.05); }
+        turretFire: () => { if(ctx && muteState!==2) playTone(800,'square',0.05,0.05); },
+        tankAggro: () => { if(ctx && muteState!==2) { playTone(200,'square',0.3,0.3); playNoise(0.3,0.2); } }
     };
 })();
 

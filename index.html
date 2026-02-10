@@ -18,6 +18,9 @@
         <div id="track-info">TRACK: NONE</div>
         <button class="dev-btn" id="dev-set-smg">SET WEAPON: SMG</button>
         <button class="dev-btn" id="dev-set-shotgun">SET WEAPON: SHOTGUN</button>
+        <button class="dev-btn" id="dev-set-minigun">SET WEAPON: MINIGUN</button>
+        <button class="dev-btn" id="dev-set-rocket">SET WEAPON: ROCKET</button>
+        <button class="dev-btn" id="dev-set-railgun">SET WEAPON: RAILGUN</button>
         <button class="dev-btn" id="dev-force-levelup">FORCE LEVEL UP (CURRENT)</button>
         <button class="dev-btn" id="dev-boss-fight">JUMP TO BOSS (W20)</button>
         <button class="dev-btn" id="dev-max-ammo">MAX AMMO</button>
@@ -36,11 +39,11 @@
             <div id="health-container"><div id="health-fill"></div></div>
         </div>
         <div class="sub-bars">
-            <div class="sub-bar-group">
+            <div class="sub-bar-group" id="dash-bar-group">
                 <div class="bar-label">Dash</div>
                 <div class="sub-bar-container"><div class="sub-bar-fill" id="dash-fill"></div></div>
             </div>
-            <div class="sub-bar-group">
+            <div class="sub-bar-group" id="focus-bar-group">
                 <div class="bar-label">Focus</div>
                 <div class="sub-bar-container"><div class="sub-bar-fill" id="focus-fill"></div></div>
             </div>
@@ -48,6 +51,7 @@
     </div>
 
     <div id="hud-top-right">
+        <div class="score-label">Lives: <span id="lives-display">3</span></div>
         <div class="score-label">Confirmed Kills</div>
         <div class="score-val" id="score-display">0</div>
         <div class="score-label" style="font-size: 10px; margin-top: 5px;">High Score: <span id="highscore-display">0</span></div>
@@ -102,12 +106,37 @@
         <button id="restart-btn">REDEPLOY</button>
     </div>
 
+    <!-- DEATH SCREEN BETWEEN LIVES -->
+    <div id="death-screen" style="display:none;">
+        <h1 style="font-size: 40px; margin: 0 0 10px 0;">KILLED IN ACTION</h1>
+        <div id="death-lives" style="font-size: 18px; margin: 10px 0; color: #ffaa00;"></div>
+        <div id="death-kills-display" style="font-size: 16px; margin: 10px 0;">Kills: <span id="death-kills">0</span></div>
+        <div id="weapon-selection" style="margin: 20px 0;">
+            <h3 style="font-size: 18px; margin-bottom: 10px;">SELECT WEAPON</h3>
+            <div id="weapon-choices" style="display: flex; flex-wrap: wrap; gap: 15px; justify-content: center;"></div>
+        </div>
+        <div id="universal-upgrades-section" style="margin: 20px 0;">
+            <h3 style="font-size: 18px; margin-bottom: 10px;">UNIVERSAL UPGRADES</h3>
+            <div id="universal-upgrades-list" style="font-size: 14px; color: #aaa;"></div>
+        </div>
+        <button id="continue-btn" style="display:none; margin-top: 20px;">CONTINUE</button>
+    </div>
+
     <!-- WEAPON UPGRADE SELECTION -->
     <div id="upgrade-selection" style="display:none;">
         <h1 style="font-size: 34px; margin: 0 0 10px 0;">WEAPON LEVEL UP</h1>
         <p id="upgrade-weapon-name" style="margin: 0 0 20px 0;"></p>
-        <div id="upgrade-choices"></div>
-        <div class="controls-hint" style="margin-top: 18px;">Choose one upgrade.</div>
+        <div class="upgrade-sections">
+            <div class="upgrade-section">
+                <h3 class="upgrade-section-title">Weapon Upgrade</h3>
+                <div id="upgrade-choices"></div>
+            </div>
+            <div class="upgrade-section">
+                <h3 class="upgrade-section-title">Universal Upgrade</h3>
+                <div id="upgrade-universal-choices"></div>
+            </div>
+        </div>
+        <div class="controls-hint" style="margin-top: 18px;">Choose one weapon upgrade and one universal upgrade.</div>
     </div>
 
     <script type="module" src="src/main.js"></script>

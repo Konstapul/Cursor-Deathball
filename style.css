@@ -79,6 +79,10 @@ canvas { display: block; position: absolute; top: 0; left: 0; }
     margin-top: 5px;
 }
 .sub-bar-group { flex: 1; }
+.sub-bar-group.locked {
+    opacity: 0.4;
+    filter: grayscale(0.8);
+}
 .sub-bar-container {
     width: 100%; height: 6px;
     background: rgba(10, 10, 10, 0.8);
@@ -187,7 +191,7 @@ canvas { display: block; position: absolute; top: 0; left: 0; }
 }
 .dev-btn:hover { background: #444; }
 
-#game-over, #start-screen, #pause-screen {
+#game-over, #start-screen, #pause-screen, #death-screen {
     position: absolute;
     top: 50%;
     left: 50%;
@@ -202,6 +206,50 @@ canvas { display: block; position: absolute; top: 0; left: 0; }
 }
 #game-over { display: none; }
 #pause-screen { display: none; z-index: 95; }
+#death-screen { display: none; z-index: 97; min-width: 500px; }
+#weapon-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    justify-content: center;
+}
+#weapon-choices .weapon-card {
+    background: rgba(0, 0, 0, 0.5);
+    border: 2px solid #555;
+    padding: 15px;
+    min-width: 150px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+}
+#weapon-choices .weapon-card:hover {
+    border-color: #44ff44;
+    background: rgba(68, 255, 68, 0.1);
+}
+#continue-btn {
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid #44ff44;
+    color: #44ff44;
+    padding: 15px 30px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 20px;
+    font-family: inherit;
+    transition: all 0.2s;
+}
+#continue-btn:hover {
+    background: rgba(68, 255, 68, 0.2);
+    border-color: #66ff66;
+    color: #66ff66;
+}
+#universal-upgrades-list {
+    font-size: 14px;
+    color: #aaa;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #555;
+}
 
 #upgrade-selection {
     position: absolute;
@@ -219,10 +267,32 @@ canvas { display: block; position: absolute; top: 0; left: 0; }
     max-width: 820px;
 }
 
-#upgrade-choices {
+.upgrade-sections {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 10px;
+}
+
+.upgrade-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.upgrade-section-title {
+    font-size: 14px;
+    color: #aaa;
+    margin: 0 0 4px 0;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+#upgrade-choices,
+#upgrade-universal-choices {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 14px;
+    gap: 10px;
 }
 
 .upgrade-choice {
@@ -238,6 +308,12 @@ canvas { display: block; position: absolute; top: 0; left: 0; }
 .upgrade-choice:hover {
     border-color: #ffff00;
     background: rgba(255, 255, 0, 0.08);
+}
+
+.upgrade-choice.selected {
+    border-color: #ffff00;
+    background: rgba(255, 255, 0, 0.15);
+    box-shadow: 0 0 8px rgba(255, 255, 0, 0.3);
 }
 
 .upgrade-title {

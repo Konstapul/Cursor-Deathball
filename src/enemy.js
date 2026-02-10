@@ -83,7 +83,8 @@ export class Enemy {
         const { wave, arena, Audio, normalizeAngle } = gameContext;
         this.type = 'zombie'; this.facing = 0; this.dead = false; this.dying = false; this.dyingTimer = 0;
         this.bossState = 'chase'; this.bossTimer = 0; this.chargeDir = {x:0, y:0}; this.chargeCooldown = 900 + Math.random() * 1500;
-        this.tankState = 'stroll'; this.tankTimer = 60 + Math.random() * 120; this.aggroTime = 0;
+        this.tankState = 'stroll'; this.tankTimer = 60 + Math.random() * 120; this.aggroTime = 0; this.wasAggro = false;
+        this.stunned = false; this.stunTimer = 0;
 
         if (typeOverride) { this.type = typeOverride; }
         else {
@@ -136,7 +137,7 @@ export class Enemy {
     }
 
     update(dt) {
-        const { player, arena, wave, enemies, corpses, godMode, noisePos, killEnemy, createExplosion, detonateNuke, endGame, updateUI, Audio, normalizeAngle } = gameContext;
+        const { player, arena, wave, enemies, corpses, godMode, noisePos, killEnemy, createExplosion, detonateNuke, endGame, handlePlayerDeath, updateUI, Audio, normalizeAngle } = gameContext;
         if (!player || !arena || !enemies) return;
 
         if (this.dying) {
@@ -156,6 +157,19 @@ export class Enemy {
                 killEnemy(this, 0);
                 detonateNuke(this.x, this.y);
             }
+            return;
+        }
+
+        if (this.stunned) {
+            this.stunTimer -= dt * 16.6;
+            if (this.stunTimer <= 0) {
+                this.stunned = false;
+                this.stunTimer = 0;
+            }
+            this.vx *= 0.9;
+            this.vy *= 0.9;
+            this.x += this.vx * dt;
+            this.y += this.vy * dt;
             return;
         }
 
@@ -215,7 +229,7 @@ export class Enemy {
                 this.x += this.vx * dt; this.y += this.vy * dt;
             }
 
-            if (!godMode && dist < this.radius + 15) {
+            if (!godMode && !gameContext.isDeathScreenShowing && dist < this.radius + 15) {
                 player.hp -= (this.bossState === 'charge' ? 10 : 5);
                 updateUI(); Audio.playerDamage();
                 const angle = Math.atan2(player.y - this.y, player.x - this.x);
@@ -223,7 +237,7 @@ export class Enemy {
                 player.vx += Math.cos(angle) * force;
                 player.vy += Math.sin(angle) * force;
                 gameContext.shakeX = 10; gameContext.shakeY = 10;
-                if (player.hp <= 0) endGame();
+                if (player.hp <= 0) (handlePlayerDeath || endGame)();
             }
         }
         else {
@@ -235,28 +249,42 @@ export class Enemy {
 
                 if (this.type === 'tank') {
                     if (this.tankState === 'aggro') {
+                        if (!this.wasAggro) {
+                            gameContext.shakeX = 10;
+                            gameContext.shakeY = 10;
+                            const { particles } = gameContext;
+                            if (particles) {
+                                for (let k = 0; k < 15; k++) {
+                                    particles.push(new Particle(this.x, this.y, '#ff0000', 8));
+                                }
+                            }
+                            this.wasAggro = true;
+                        }
                         let delta = normalizeAngle(targetAngle - this.facing);
                         const turnSpeed = 0.005 * dt;
                         if (Math.abs(delta) < turnSpeed) this.facing = targetAngle;
                         else this.facing += Math.sign(delta) * turnSpeed;
                         moveX = Math.cos(this.facing); moveY = Math.sin(this.facing);
                         this.aggroTime -= dt;
-                        if (this.aggroTime <= 0) { this.tankState = 'idle'; this.tankTimer = 60 + Math.random() * 60; }
-                    } else if (this.tankState === 'stroll') {
-                        moveX = Math.cos(this.facing) * 0.4; moveY = Math.sin(this.facing) * 0.4;
-                        this.tankTimer -= dt;
-                        const pad = 100;
-                        if (this.x < arena.x + pad || this.x > arena.x + arena.w - pad ||
-                            this.y < arena.y + pad || this.y > arena.y + arena.h - pad) {
-                             const cx = arena.x + arena.w/2; const cy = arena.y + arena.h/2;
-                             this.facing = Math.atan2(cy - this.y, cx - this.x) + (Math.random()-0.5);
-                        }
-                        if (this.tankTimer <= 0) { this.tankState = 'idle'; this.tankTimer = 60 + Math.random() * 120; }
+                        if (this.aggroTime <= 0) { this.tankState = 'idle'; this.tankTimer = 60 + Math.random() * 60; this.wasAggro = false; }
                     } else {
-                        moveX = 0; moveY = 0; this.tankTimer -= dt;
-                        if (this.tankTimer <= 0) {
-                            this.tankState = 'stroll'; this.tankTimer = 120 + Math.random() * 120;
-                            this.facing = Math.random() * Math.PI * 2;
+                        this.wasAggro = false;
+                        if (this.tankState === 'stroll') {
+                            moveX = Math.cos(this.facing) * 0.4; moveY = Math.sin(this.facing) * 0.4;
+                            this.tankTimer -= dt;
+                            const pad = 100;
+                            if (this.x < arena.x + pad || this.x > arena.x + arena.w - pad ||
+                                this.y < arena.y + pad || this.y > arena.y + arena.h - pad) {
+                                 const cx = arena.x + arena.w/2; const cy = arena.y + arena.h/2;
+                                 this.facing = Math.atan2(cy - this.y, cx - this.x) + (Math.random()-0.5);
+                            }
+                            if (this.tankTimer <= 0) { this.tankState = 'idle'; this.tankTimer = 60 + Math.random() * 120; }
+                        } else {
+                            moveX = 0; moveY = 0; this.tankTimer -= dt;
+                            if (this.tankTimer <= 0) {
+                                this.tankState = 'stroll'; this.tankTimer = 120 + Math.random() * 120;
+                                this.facing = Math.random() * Math.PI * 2;
+                            }
                         }
                     }
                 }
@@ -306,9 +334,9 @@ export class Enemy {
                     neighborCount++;
                 }
                 else {
-                    let force = 0.5 * dt;
-                    this.x += Math.cos(angle) * force;
-                    this.y += Math.sin(angle) * force;
+                    const separationFactor = 0.8;
+                    this.x += Math.cos(angle) * overlap * separationFactor;
+                    this.y += Math.sin(angle) * overlap * separationFactor;
                 }
             }
         }
@@ -392,6 +420,26 @@ export class Enemy {
                 ctx.strokeStyle = '#333'; ctx.beginPath(); ctx.arc(0,0, this.radius-4, 0, Math.PI*2); ctx.stroke();
             }
         }
+
+        if (this.stunned) {
+            ctx.globalAlpha = 0.7;
+            ctx.strokeStyle = '#00aaff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius + 4, 0, Math.PI * 2);
+            ctx.stroke();
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2;
+                const startR = this.radius + 2;
+                const endR = this.radius + 8;
+                ctx.beginPath();
+                ctx.moveTo(Math.cos(angle) * startR, Math.sin(angle) * startR);
+                ctx.lineTo(Math.cos(angle) * endR, Math.sin(angle) * endR);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1.0;
+        }
+
         ctx.restore();
     }
 }
